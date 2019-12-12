@@ -67,4 +67,64 @@ class ValidationSchemaWiringTest extends Specification {
         er.errors[2].message == "/cars/filter/model size must be between 0 and 10"
         er.errors[2].path == ["cars"]
     }
+
+    def "integration test of multiple rules being applied to mutation"() {
+
+        def directiveRules = DirectiveConstraints.newDirectiveConstraints().build()
+
+        def sdl = '''
+
+            ''' + directiveRules.directivesSDL + '''
+
+            type Car {
+                model : String
+                make : String
+            }
+
+            input CarInput {
+                model : String @Size(max : 10)
+                make : String
+                age : Int @Range(max : 5) @Expression(value : "${validatedValue==20}")
+            }
+
+            type Query {
+                cars : [Car]
+            }
+
+            type Mutation {
+                createCar(input: CarInput) : [Car] @Expression(value : "${false}")
+            }
+        '''
+
+        ValidationRules possibleRules = ValidationRules.newValidationRules()
+                .build()
+
+        ValidationSchemaWiring schemaWiring = new ValidationSchemaWiring(possibleRules)
+
+        def runtime = RuntimeWiring.newRuntimeWiring().directiveWiring(schemaWiring).build()
+        def schema = TestUtil.schema(sdl, runtime)
+        def graphQL = GraphQL.newGraphQL(schema).build()
+
+        when:
+        def er = graphQL.execute('''
+           mutation CreateCar {
+               createCar(input: { model : "Ford OR Toyota", age : 20 }) {
+                   model
+                   make
+               }
+           }
+        ''')
+
+        then:
+        def specification = er.toSpecification()
+        specification != null
+
+        er.errors.size() == 3
+        er.errors[0].message == "/createCar expression must evaluate to true"
+        er.errors[0].path == ["createCar"]
+        er.errors[1].message == "/createCar/input/age range must be between 0 and 5"
+        er.errors[1].path == ["createCar"]
+        er.errors[2].message == "/createCar/input/model size must be between 0 and 10"
+        er.errors[2].path == ["createCar"]
+    }
 }
